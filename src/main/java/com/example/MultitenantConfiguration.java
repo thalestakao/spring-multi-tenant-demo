@@ -6,6 +6,10 @@ import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.datasource.lookup.AbstractRoutingDataSource;
+
+import com.example.domain.Tenant;
+import com.example.domain.TenantRepository;
 
 import javax.sql.DataSource;
 import java.io.*;
@@ -15,76 +19,50 @@ import java.util.*;
 @Configuration
 public class MultitenantConfiguration {
 
-    @Autowired
-    private DataSourceProperties properties;
+	@Autowired
+	private DataSourceProperties properties;
 
-    /**
-     * Defines the data source for the application
-     * @return
-     */
-    @Bean
-    @ConfigurationProperties(
-            prefix = "spring.datasource"
-    )
-    public DataSource dataSource() {
-        File[] files = Paths.get("tenants").toFile().listFiles();
-        Map<Object,Object> resolvedDataSources = new HashMap<>();
+	@Autowired
+	private DataSourceMap dataSourceMap;
 
-        for(File propertyFile : files) {
-            Properties tenantProperties = new Properties();
-            DataSourceBuilder dataSourceBuilder = new DataSourceBuilder(this.getClass().getClassLoader());
+	/**
+	 * Defines the data source for the application
+	 * 
+	 * @return
+	 */
+	@Bean
+	@ConfigurationProperties(prefix = "spring.datasource")
+	public DataSource dataSource() {
 
-            try {
-                tenantProperties.load(new FileInputStream(propertyFile));
+		// Create the final multi-tenant source.
+		// It needs a default database to connect to.
+		// Make sure that the default database is actually an empty tenant database.
+		// Don't use that for a regular tenant if you want things to be safe!
+		MultitenantDataSource dataSource = new MultitenantDataSource();
+		dataSource.setDefaultTargetDataSource(defaultDataSource());
+		dataSource.setTargetDataSources(dataSourceMap.getDataSourceMap());
 
-                String tenantId = tenantProperties.getProperty("name");
+		// Call this to finalize the initialization of the data source.
+		dataSource.afterPropertiesSet();
 
-                dataSourceBuilder.driverClassName(properties.getDriverClassName())
-                        .url(tenantProperties.getProperty("datasource.url"))
-                        .username(tenantProperties.getProperty("datasource.username"))
-                        .password(tenantProperties.getProperty("datasource.password"));
+		return dataSource;
+	}
 
-                if(properties.getType() != null) {
-                    dataSourceBuilder.type(properties.getType());
-                }
+	/**
+	 * Creates the default data source for the application
+	 * 
+	 * @return
+	 */
+	private DataSource defaultDataSource() {
+		DataSourceBuilder dataSourceBuilder = new DataSourceBuilder(this.getClass().getClassLoader())
+				.driverClassName(properties.getDriverClassName()).url(properties.getUrl())
+				.username(properties.getUsername()).password(properties.getPassword());
 
-                resolvedDataSources.put(tenantId, dataSourceBuilder.build());
-            } catch (IOException e) {
-                e.printStackTrace();
+		if (properties.getType() != null) {
+			dataSourceBuilder.type(properties.getType());
+		}
 
-                return null;
-            }
-        }
+		return dataSourceBuilder.build();
+	}
 
-        // Create the final multi-tenant source.
-        // It needs a default database to connect to.
-        // Make sure that the default database is actually an empty tenant database.
-        // Don't use that for a regular tenant if you want things to be safe!
-        MultitenantDataSource dataSource = new MultitenantDataSource();
-        dataSource.setDefaultTargetDataSource(defaultDataSource());
-        dataSource.setTargetDataSources(resolvedDataSources);
-
-        // Call this to finalize the initialization of the data source.
-        dataSource.afterPropertiesSet();
-
-        return dataSource;
-    }
-
-    /**
-     * Creates the default data source for the application
-     * @return
-     */
-    private DataSource defaultDataSource() {
-        DataSourceBuilder dataSourceBuilder = new DataSourceBuilder(this.getClass().getClassLoader())
-                .driverClassName(properties.getDriverClassName())
-                .url(properties.getUrl())
-                .username(properties.getUsername())
-                .password(properties.getPassword());
-
-        if(properties.getType() != null) {
-            dataSourceBuilder.type(properties.getType());
-        }
-
-        return dataSourceBuilder.build();
-    }
 }
